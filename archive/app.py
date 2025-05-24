@@ -299,8 +299,8 @@ if not(device_telescope.isConnected()):
     # Property vectors are mapped to iterable Python objects
     # Hence we can access each element of the vector using Python indexing
     # each element of the "CONNECTION" vector is a ISwitch
-    telescope_connect[0].s=PyIndi.ISS_ON  # the "CONNECT" switch
-    telescope_connect[1].s=PyIndi.ISS_OFF # the "DISCONNECT" switch
+    telescope_connect[0].setState(PyIndi.ISS_ON)  # the "CONNECT" switch
+    telescope_connect[1].setState(PyIndi.ISS_OFF) # the "DISCONNECT" switch
     indiclient.sendNewSwitch(telescope_connect) # send this new value to the device
 
 # We want to set the ON_COORD_SET switch to engage tracking after goto
@@ -311,9 +311,9 @@ while not(telescope_on_coord_set):
     telescope_on_coord_set=device_telescope.getSwitch("ON_COORD_SET")
 
 # the order below is defined in the property vector
-telescope_on_coord_set[0].s=PyIndi.ISS_ON  # TRACK
-telescope_on_coord_set[1].s=PyIndi.ISS_OFF # SLEW
-telescope_on_coord_set[2].s=PyIndi.ISS_OFF # SYNC
+telescope_on_coord_set[0].setState(PyIndi.ISS_ON)  # TRACK
+telescope_on_coord_set[1].setState(PyIndi.ISS_OFF) # SLEW
+telescope_on_coord_set[2].setState(PyIndi.ISS_OFF) # SYNC
 indiclient.sendNewSwitch(telescope_on_coord_set)
 
 # Set up CCD camera 
@@ -327,8 +327,8 @@ while not(ccd_connect):
     time.sleep(0.5)
     ccd_connect=device_ccd.getSwitch("CONNECTION")
 if not(device_ccd.isConnected()):
-    ccd_connect[0].s=PyIndi.ISS_ON  # the "CONNECT" switch
-    ccd_connect[1].s=PyIndi.ISS_OFF # the "DISCONNECT" switch
+    ccd_connect[0].setState(PyIndi.ISS_ON)  # the "CONNECT" switch
+    ccd_connect[1].setState(PyIndi.ISS_OFF) # the "DISCONNECT" switch
     indiclient.sendNewSwitch(ccd_connect)
  
 ccd_exposure=device_ccd.getNumber("CCD_EXPOSURE")
@@ -468,7 +468,7 @@ while (1):        # Loop forever
     root.update()
     
     # See if we are slewing or do we need a solve?
-    if (telescope_radec.s==PyIndi.IPS_BUSY):
+    if (telescope_radec.getState()==PyIndi.IPS_BUSY):
         currStatusText.configure(text="SLEWING")
         root.update()
         solveOk=False  # We'll need to do a solve after the motion stops
