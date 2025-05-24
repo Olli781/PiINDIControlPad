@@ -249,6 +249,11 @@ except Error as e:
 class IndiClient(PyIndi.BaseClient):
     def __init__(self):
         super(IndiClient, self).__init__()
+    def updateProperty(self, prop):
+        global blobEvent
+        if prop.getType() == PyIndi.INDI_BLOB:
+            print("new BLOB ", prop.getName())
+            blobEvent.set()
     def newDevice(self, d):
         pass
     def newProperty(self, p):
@@ -277,31 +282,42 @@ class IndiClient(PyIndi.BaseClient):
 indiclient=IndiClient()
 indiclient.setServer("localhost",7624)
 
-if (not(indiclient.connectServer())):
-     print("No indiserver running on "+indiclient.getHost()+":"+str(indiclient.getPort())+" - Try to run")
-     print("  indiserver indi_simulator_telescope indi_simulator_ccd")
-     sys.exit(1)
- 
+if not indiclient.connectServer():
+    print(
+        "No indiserver running on "
+        + indiclient.getHost()
+        + ":"
+        + str(indiclient.getPort())
+        + " - Try to run"
+    )
+    print("  indiserver indi_simulator_telescope indi_simulator_ccd")
+    sys.exit(1)
+
+# connect the scope
+telescope = "Telescope Simulator"
+device_telescope = None
+telescope_connect = None
+
 # get the telescope device
-device_telescope=indiclient.getDevice(telescope)
-while not(device_telescope):
+device_telescope = indiclient.getDevice(telescope)
+while not device_telescope:
     time.sleep(0.5)
-    device_telescope=indiclient.getDevice(telescope)
-     
+    device_telescope = indiclient.getDevice(telescope)
+
 # wait CONNECTION property be defined for telescope
-telescope_connect=device_telescope.getSwitch("CONNECTION")
-while not(telescope_connect):
+telescope_connect = device_telescope.getSwitch("CONNECTION")
+while not telescope_connect:
     time.sleep(0.5)
-    telescope_connect=device_telescope.getSwitch("CONNECTION")
- 
+    telescope_connect = device_telescope.getSwitch("CONNECTION")
+
 # if the telescope device is not connected, we do connect it
-if not(device_telescope.isConnected()):
+if not device_telescope.isConnected():
     # Property vectors are mapped to iterable Python objects
     # Hence we can access each element of the vector using Python indexing
     # each element of the "CONNECTION" vector is a ISwitch
+    telescope_connect.reset()
     telescope_connect[0].setState(PyIndi.ISS_ON)  # the "CONNECT" switch
-    telescope_connect[1].setState(PyIndi.ISS_OFF) # the "DISCONNECT" switch
-    indiclient.sendNewSwitch(telescope_connect) # send this new value to the device
+    indiclient.sendNewProperty(telescope_connect)  # send this new value to the device
 
 # We want to set the ON_COORD_SET switch to engage tracking after goto
 # device.getSwitch is a helper to retrieve a property vector
