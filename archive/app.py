@@ -42,6 +42,7 @@ currLong= -97.1384
 currAlt=300
 minAlt=15                            	# Minimum altitude to slew to
 currTour=0				# Current tour we're working on
+objectDisplay = ""
    
 #######################################################################################
 #### F U N C T I O N S ################################################################
@@ -228,6 +229,18 @@ def stop():
     objectDisplay="STOP"
     return 
 
+
+def updateObjectDisplay():
+    currObjText.configure(text=objectDisplay)
+    root.update()
+
+def oneEntry():
+    global objectDisplay
+    objectDisplay += "1"
+    updateObjectDisplay()
+
+
+
 #######################################################################################
 #### M Y S Q L ########################################################################
 ####################################################################################### 
@@ -392,75 +405,52 @@ for x in range(5):
 for y in range(11):
     tk.Grid.rowconfigure(root, y, weight=1)
 
+# Anzeige
+currObjText = tk.Label(root, text=objectDisplay, font='verdana 20', bg='black', fg='white')
+currObjText.grid(row=0, column=0, columnspan=5, sticky="nsew")
 
-# Top row
-currDateText = tk.Label(root, text="", anchor="w") 
-currDateText.configure(font='verdana 14', fg='red', bg='black')
-currDateText.grid(row=0, column=0, columnspan=2, sticky="w")
-currStatusText = tk.Label(root, text=IP, anchor="e",justify="left") 
-currStatusText.configure(font='verdana 14', fg='red', bg='black')
-currStatusText.grid(row=0, column=2, columnspan=3,sticky="e")
+# Buttons
+buttons = [
+    ('1', oneEntry), ('2', twoEntry), ('3', threeEntry),
+    ('4', fourEntry), ('5', fiveEntry), ('6', sixEntry),
+    ('7', sevenEntry), ('8', eightEntry), ('9', nineEntry),
+    ('Solve', solveEntry), ('0', zeroEntry), ('Goto', gotoEntry),
+    ('Clear', clearObject)
+]
 
-# Middle Rows
-currObjText = tk.Label(root, text="") 
-currObjText.configure(font='verdana 24', fg='red', bg='black', padx=0, highlightbackground='red', highlightthickness=2, highlightcolor="black")
-currObjText.grid(row=2, column=1, columnspan=3, sticky="nsew")
-messierButton=tk.Button(root, text="Messier", command=lambda: messierObject(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-messierButton.grid(row=2, column=4, sticky="nsew")
+row = 1
+col = 0
 
-oneButton=tk.Button(root, text="1", command=lambda: oneEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-oneButton.grid(row=3, column=1, sticky="nsew")
-twoButton=tk.Button(root, text="  2  ", command=lambda: twoEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-twoButton.grid(row=3, column=2, sticky="nsew")
-threeButton=tk.Button(root, text="3", command=lambda: threeEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-threeButton.grid(row=3, column=3, sticky="nsew")
-ngcButton=tk.Button(root, text="NGC", command=lambda: ngcObject(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-ngcButton.grid(row=3, column=4, sticky="nsew")
+for (text, cmd) in buttons:
+    b = tk.Button(root, text=text, command=cmd,
+                  fg='red', bg='black', padx=2,
+                  highlightbackground='red', highlightthickness=2,
+                  highlightcolor="black", font='verdana 24')
+    b.grid(row=row, column=col, sticky="nsew")
+    col += 1
+    if col > 2:
+        col = 0
+        row += 1
 
-fourButton=tk.Button(root, text="4", command=lambda: fourEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-fourButton.grid(row=4, column=1, sticky="nsew")
-fiveButton=tk.Button(root, text="5", command=lambda: fiveEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-fiveButton.grid(row=4, column=2, sticky="nsew")
-sixButton=tk.Button(root, text="6", command=lambda: sixEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-sixButton.grid(row=4, column=3, sticky="nsew")
-caldwellButton=tk.Button(root, text="Caldwell", command=lambda: caldwellObject(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-caldwellButton.grid(row=4, column=4, sticky="nsew")
+# Prev und Next Buttons
+prevButton = tk.Button(root, text="Prev", command=prevEntry,
+                       fg='red', bg='black', padx=2,
+                       highlightbackground='red', highlightthickness=2,
+                       highlightcolor="black", font='verdana 24')
+prevButton.grid(row=5, column=0, columnspan=2, sticky="nsew")
 
-sevenButton=tk.Button(root, text="7", command=lambda: sevenEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-sevenButton.grid(row=5, column=1, sticky="nsew")
-eightButton=tk.Button(root, text="8", command=lambda: eightEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-eightButton.grid(row=5, column=2, sticky="nsew")
-nineButton=tk.Button(root, text="9", command=lambda: nineEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-nineButton.grid(row=5, column=3, sticky="nsew")
-tourButton=tk.Button(root, text="Tour", command=lambda: tourEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-tourButton.grid(row=5, column=4, sticky="nsew")
+nextButton = tk.Button(root, text="Next", command=nextEntry,
+                       fg='red', bg='black', padx=2,
+                       highlightbackground='red', highlightthickness=2,
+                       highlightcolor="black", font='verdana 24')
+nextButton.grid(row=5, column=2, columnspan=2, sticky="nsew")
 
-sevenButton=tk.Button(root, text="Solve", command=lambda: solveEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-sevenButton.grid(row=6, column=1, sticky="nsew")
-eightButton=tk.Button(root, text="0", command=lambda: zeroEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-eightButton.grid(row=6, column=2, sticky="nsew")
-nineButton=tk.Button(root, text="Goto", command=lambda: gotoEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-nineButton.grid(row=6, column=3, sticky="nsew")
-tourButton=tk.Button(root, text="Clear", command=lambda: clearObject(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-tourButton.grid(row=6, column=4, sticky="nsew")
+# Spalten-/Zeilenkonfiguration für gleichmäßige Verteilung
+for i in range(5):
+    root.columnconfigure(i, weight=1)
+for i in range(6):
+    root.rowconfigure(i, weight=1)
 
-nextButton=tk.Button(root, text="Prev", command=lambda: prevEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-nextButton.grid(row=7, column=1, columnspan=2, sticky="nsew")
-PrevButton=tk.Button(root, text="Next", command=lambda: nextEntry(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-PrevButton.grid(row=7, column=3, columnspan=2, sticky="nsew")
-
-
-tourButton=tk.Button(root, text="S T O P", command=lambda: stop(), fg='red', bg='black', padx=2, highlightbackground='red', highlightthickness=2, highlightcolor="black", font='verdana 24')
-tourButton.grid(row=8, column=1, columnspan=4,sticky="nsew")
-
-
-# Bottom Rows
-currUTDateText = tk.Label(root, text="", anchor="w") 
-currUTDateText.configure(font='verdana 14', fg='red', bg='black')
-currUTDateText.grid(row=11, column=0,columnspan=2,  sticky="nsew")
-currIPText = tk.Label(root, text=IP, anchor="e") 
-currIPText.configure(font='verdana 14', fg='red', bg='black')
-currIPText.grid(row=11, column=6, sticky="nsew")
 
 #######################################################################################
 #### M A I N L I N E ##################################################################
