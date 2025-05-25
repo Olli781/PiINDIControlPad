@@ -219,32 +219,43 @@ class AstroController:
         self.indiclient.sendNewNumber(coords)
 
     def goto_object(self, object_name):
-        try:
-            object_name = object_name.strip().upper().replace("  ", " ")
-            if object_name.startswith("MESSIER") and not object_name.startswith("MESSIER "):
-                object_name = object_name.replace("MESSIER", "M ", 1)
-            elif object_name.startswith("M") and not object_name.startswith("M "):
-                object_name = object_name.replace("M", "M ", 1)
-            elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
-                object_name = object_name.replace("NGC", "NGC ", 1)
-            elif object_name.startswith("IC") and not object_name.startswith("IC "):
-                object_name = object_name.replace("IC", "IC ", 1)
+    try:
+        obj = object_name.strip().upper().replace("  ", " ")
 
-            result = Simbad.query_object(object_name)
-            if result is None:
-                logging.warning(f"Objekt '{object_name}' nicht gefunden")
-                self.objectDisplay = f"Nicht gefunden: {object_name}"
-                return
-            ra_str = result['RA'][0]
-            dec_str = result['DEC'][0]
-            ra = self.hms_to_degrees(ra_str)
-            dec = self.dms_to_degrees(dec_str)
-            self.update_position(ra, dec)
-            self.objectDisplay = f"Goto {object_name}"
-            logging.info(f"Goto {object_name}: RA={ra}, DEC={dec}")
-        except Exception as e:
-            logging.error(f"Fehler bei Goto {object_name}: {e}")
-            self.objectDisplay = f"Fehler: {object_name}"
+        # Für M, NGC, IC: entferne Leerzeichen, damit Simbad das besser findet
+        if obj.startswith("M"):
+            obj_clean = "M" + obj[1:].replace(" ", "")
+        elif obj.startswith("NGC"):
+            obj_clean = "NGC" + obj[3:].replace(" ", "")
+        elif obj.startswith("IC"):
+            obj_clean = "IC" + obj[2:].replace(" ", "")
+        else:
+            obj_clean = obj
+
+        # Erst Versuch mit 'obj_clean'
+        result = Simbad.query_object(obj_clean)
+
+        # Wenn nicht gefunden, probiere 'obj' mit Leerzeichen
+        if result is None and obj != obj_clean:
+            result = Simbad.query_object(obj)
+
+        if result is None:
+            self.objectDisplay = f"Nicht gefunden: {object_name}"
+            return
+
+        ra_str = result['RA'][0]
+        dec_str = result['DEC'][0]
+
+        ra = self.hms_to_degrees(ra_str)
+        dec = self.dms_to_degrees(dec_str)
+
+        self.update_position(ra, dec)
+        self.objectDisplay = f"Goto {obj_clean} (RA={ra:.4f}, DEC={dec:.4f})"
+
+    except Exception as e:
+        self.objectDisplay = f"Fehler: {object_name}"
+        logging.error(f"goto_object Fehler bei '{object_name}': {e}")
+
 
     def hms_to_degrees(self, hms):
         h, m, s = [float(part) for part in hms.split()]
