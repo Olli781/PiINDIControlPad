@@ -58,7 +58,6 @@ class AstroController:
         self.setup_indi()
         self.ip_address = self.get_ip_address()
         self.init_database()
-        self.gui_update_display = None  # Wird von GUI gesetzt
 
     def setup_indi(self):
         self.indiclient.setServer("localhost", 7624)
@@ -203,7 +202,6 @@ class AstroController:
             if result is None:
                 logging.warning(f"Objekt '{object_name}' nicht gefunden")
                 self.objectDisplay = f"Nicht gefunden: {object_name}"
-                self.gui_update_display()
                 return
             ra_str = result['RA'][0]
             dec_str = result['DEC'][0]
@@ -212,11 +210,9 @@ class AstroController:
             self.update_position(ra, dec)
             self.objectDisplay = f"Goto {object_name}"
             logging.info(f"Goto {object_name}: RA={ra}, DEC={dec}")
-            self.gui_update_display()
         except Exception as e:
             logging.error(f"Fehler bei Goto {object_name}: {e}")
             self.objectDisplay = f"Fehler: {object_name}"
-            self.gui_update_display()
 
     def hms_to_degrees(self, hms):
         h, m, s = [float(part) for part in hms.split()]
@@ -259,26 +255,6 @@ class AstroController:
         plt.tight_layout()
         plt.show()
 
-    def synchronisieren(self):
-        try:
-            coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
-            if coords is not None:
-                ra = coords[0].value
-                dec = coords[1].value
-                self.objectDisplay = f"Sync RA: {ra:.4f} DEC: {dec:.4f}"
-                if self.gui_update_display:
-                    self.gui_update_display()
-                logging.info(f"Synchronisiert: RA={ra}, DEC={dec}")
-            else:
-                self.objectDisplay = "Keine Positionsdaten"
-                if self.gui_update_display:
-                    self.gui_update_display()
-        except Exception as e:
-            logging.error(f"Fehler bei Synchronisation: {e}")
-            self.objectDisplay = "Sync Fehler"
-            if self.gui_update_display:
-                self.gui_update_display()
-
 # GUI mit Liveanzeige und Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
@@ -290,9 +266,6 @@ if __name__ == "__main__":
     def update_display():
         label_display.config(text=controller.objectDisplay)
         root.update()
-
-    # Die Methode in controller setzen, damit Controller die GUI updaten kann
-    controller.gui_update_display = update_display
 
     def add_digit(d):
         controller.objectDisplay += d
@@ -324,9 +297,6 @@ if __name__ == "__main__":
     def start_plot():
         threading.Thread(target=controller.start_live_plot, daemon=True).start()
 
-    def synchronisieren_button():
-        controller.synchronisieren()
-
     label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
     label_display.grid(row=0, column=0, columnspan=5, sticky="nsew")
 
@@ -355,9 +325,9 @@ if __name__ == "__main__":
     tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew")
     tk.Button(root, text="Live-Plot", command=start_plot, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
 
-    row += 1
-    sync_button = tk.Button(root, text="Synchronisieren", command=synchronisieren_button,
-                            fg='blue', bg='black', padx=2, font='verdana 18')
-    sync_button.grid(row=row, column=0, columnspan=3, sticky="nsew")
+    for i in range(5):
+        root.columnconfigure(i, weight=1)
+    for i in range(6):
+        root.rowconfigure(i, weight=1)
 
     root.mainloop()
