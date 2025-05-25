@@ -4,17 +4,15 @@ from datetime import datetime
 import socket
 import PyIndi
 import time
-import numpy as np
-from astropy.wcs import WCS
-from astropy.io import fits
-import sys
 import threading
 import os
-import math
+import sys
 import logging
 from pathlib import Path
 import sqlite3
 from astroquery.simbad import Simbad
+from astropy.wcs import WCS
+from astropy.io import fits
 
 # Logging einrichten
 logging.basicConfig(
@@ -28,11 +26,6 @@ DEBUG = True
 EXPOSURE_TIME = 5.0
 TELESCOPE_NAME = "Telescope Simulator"
 CCD_NAME = "CCD Simulator"
-MAX_DEVIATION_ARCSEC = 30
-LATITUDE = 49.8951
-LONGITUDE = -97.1384
-ALTITUDE = 300
-UTC = pytz.utc
 DB_PATH = Path("astro_data.db")
 
 class IndiClient(PyIndi.BaseClient):
@@ -42,39 +35,6 @@ class IndiClient(PyIndi.BaseClient):
 
     def newBLOB(self, bp):
         self.blob_event.set()
-
-    def newDevice(self, device):
-        pass
-
-    def newProperty(self, property):
-        pass
-
-    def newSwitch(self, svp):
-        pass
-
-    def newNumber(self, nvp):
-        pass
-
-    def newText(self, tvp):
-        pass
-
-    def newMessage(self, device, message):
-        pass
-
-    def newLight(self, lvp):
-        pass
-
-    def newBLOB(self, bp):
-        self.blob_event.set()
-
-    def newSwitchVector(self, svp):
-        pass
-
-    def newNumberVector(self, nvp):
-        pass
-
-    def newTextVector(self, tvp):
-        pass
 
 class AstroController:
     def __init__(self):
@@ -219,47 +179,46 @@ class AstroController:
         self.indiclient.sendNewNumber(coords)
 
     def goto_object(self, object_name):
-    try:
-        obj = object_name.strip().upper().replace("  ", " ")
+        try:
+            obj = object_name.strip().upper().replace("  ", " ")
 
-        # Für M, NGC, IC: entferne Leerzeichen, damit Simbad das besser findet
-        if obj.startswith("M"):
-            obj_clean = "M" + obj[1:].replace(" ", "")
-        elif obj.startswith("NGC"):
-            obj_clean = "NGC" + obj[3:].replace(" ", "")
-        elif obj.startswith("IC"):
-            obj_clean = "IC" + obj[2:].replace(" ", "")
-        else:
-            obj_clean = obj
+            # Für M, NGC, IC: Leerzeichen entfernen für bessere Suche
+            if obj.startswith("M"):
+                obj_clean = "M" + obj[1:].replace(" ", "")
+            elif obj.startswith("NGC"):
+                obj_clean = "NGC" + obj[3:].replace(" ", "")
+            elif obj.startswith("IC"):
+                obj_clean = "IC" + obj[2:].replace(" ", "")
+            else:
+                obj_clean = obj
 
-        # Erst Versuch mit 'obj_clean'
-        result = Simbad.query_object(obj_clean)
+            # Erst Versuch mit 'obj_clean'
+            result = Simbad.query_object(obj_clean)
 
-        # Wenn nicht gefunden, probiere 'obj' mit Leerzeichen
-        if result is None and obj != obj_clean:
-            result = Simbad.query_object(obj)
+            # Wenn nicht gefunden, probiere 'obj' mit Leerzeichen
+            if result is None and obj != obj_clean:
+                result = Simbad.query_object(obj)
 
-        if result is None:
-            self.objectDisplay = f"Nicht gefunden: {object_name}"
-            return
+            if result is None:
+                self.objectDisplay = f"Nicht gefunden: {object_name}"
+                return
 
-        ra_str = result['RA'][0]
-        dec_str = result['DEC'][0]
+            ra_str = result['RA'][0]
+            dec_str = result['DEC'][0]
 
-        ra = self.hms_to_degrees(ra_str)
-        dec = self.dms_to_degrees(dec_str)
+            ra = self.hms_to_degrees(ra_str)
+            dec = self.dms_to_degrees(dec_str)
 
-        self.update_position(ra, dec)
-        self.objectDisplay = f"Goto {obj_clean} (RA={ra:.4f}, DEC={dec:.4f})"
+            self.update_position(ra, dec)
+            self.objectDisplay = f"Goto {obj_clean} (RA={ra:.4f}, DEC={dec:.4f})"
 
-    except Exception as e:
-        self.objectDisplay = f"Fehler: {object_name}"
-        logging.error(f"goto_object Fehler bei '{object_name}': {e}")
-
+        except Exception as e:
+            self.objectDisplay = f"Fehler: {object_name}"
+            logging.error(f"goto_object Fehler bei '{object_name}': {e}")
 
     def hms_to_degrees(self, hms):
         h, m, s = [float(part) for part in hms.split()]
-        return 15 * (h + m/60 + s/3600)
+        return 15 * (h + m / 60 + s / 3600)
 
     def dms_to_degrees(self, dms):
         parts = dms.split()
@@ -267,21 +226,21 @@ class AstroController:
         d = abs(float(parts[0]))
         m = float(parts[1])
         s = float(parts[2])
-        return sign * (d + m/60 + s/3600)
+        return sign * (d + m / 60 + s / 3600)
 
     def synchronize(self):
-        # Synchronisieren: Aktuelle Position der Montierung als Referenz setzen
+        # Beispielimplementierung: Hier kann man die Synchronisation mit Teleskopstatus einbauen
         coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
-        if coords is None:
-            self.objectDisplay = "Synchronisation fehlgeschlagen"
-            return
-        ra = coords[0].value
-        dec = coords[1].value
-        # Beispiel: Einfach Save Observation als Sync-Operation
-        self.save_observation(ra, dec, True)
-        self.objectDisplay = f"Synchronisiert RA={ra:.4f} DEC={dec:.4f}"
-        logging.info(self.objectDisplay)
+        if coords:
+            ra = coords[0].value
+            dec = coords[1].value
+            self.objectDisplay = f"Sync RA={ra:.4f} DEC={dec:.4f}"
+            logging.info(f"Synchronisiert mit RA={ra}, DEC={dec}")
+        else:
+            self.objectDisplay = "Sync fehlgeschlagen"
+            logging.warning("Synchronisation fehlgeschlagen - keine Koordinaten")
 
+# GUI mit Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
 
@@ -324,42 +283,37 @@ if __name__ == "__main__":
         controller.synchronize()
         update_display()
 
+    label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
+    label_display.grid(row=0, column=0, columnspan=5, sticky="nsew")
+
     buttons = [
         ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
         ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
         ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
         ('Messier', lambda: add_digit('M')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
-        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto)
+        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto),
+        ('Clear', clear)
     ]
 
     row = 1
     col = 0
-    max_cols = 5
     for (text, cmd) in buttons:
         b = tk.Button(root, text=text, command=cmd, fg='red', bg='black', padx=2,
                       highlightbackground='red', highlightthickness=2,
                       highlightcolor="black", font='verdana 18')
-        b.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+        b.grid(row=row, column=col, sticky="nsew")
         col += 1
-        if col >= max_cols:
+        if col > 2:
             col = 0
             row += 1
 
-    # Clear-Button extra, unten rechts
-    btn_clear = tk.Button(root, text="Clear", command=clear, fg='white', bg='red', font='verdana 18')
-    btn_clear.grid(row=row, column=max_cols-1, sticky="nsew", padx=2, pady=2)
+    tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew")
+    tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew")
+    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
 
-    # Prev, Next, Synchronisieren daneben
-    tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew", padx=2, pady=2)
-    tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew", padx=2, pady=2)
-    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='blue', fg='white').grid(row=row, column=2, sticky="nsew", padx=2, pady=2)
-
-    for i in range(max_cols):
+    for i in range(5):
         root.columnconfigure(i, weight=1)
     for i in range(row+1):
         root.rowconfigure(i, weight=1)
-
-    label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
-    label_display.grid(row=0, column=0, columnspan=max_cols, sticky="nsew")
 
     root.mainloop()
