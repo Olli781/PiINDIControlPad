@@ -18,7 +18,7 @@ from astroquery.simbad import Simbad
 
 # Logging einrichten
 logging.basicConfig(
-    filename='astrocontroller.log', 
+    filename='astrocontroller.log',
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s'
 )
@@ -39,18 +39,42 @@ class IndiClient(PyIndi.BaseClient):
     def __init__(self):
         super(IndiClient, self).__init__()
         self.blob_event = threading.Event()
-        self.status_lock = threading.Lock()
-        self.current_ra = None
-        self.current_dec = None
 
     def newBLOB(self, bp):
         self.blob_event.set()
 
-    def newNumber(self, np):
-        if np.name == "EQUATORIAL_EOD_COORD":
-            with self.status_lock:
-                self.current_ra = np[0].value
-                self.current_dec = np[1].value
+    def newDevice(self, device):
+        pass
+
+    def newProperty(self, property):
+        pass
+
+    def newSwitch(self, svp):
+        pass
+
+    def newNumber(self, nvp):
+        pass
+
+    def newText(self, tvp):
+        pass
+
+    def newMessage(self, device, message):
+        pass
+
+    def newLight(self, lvp):
+        pass
+
+    def newBLOB(self, bp):
+        self.blob_event.set()
+
+    def newSwitchVector(self, svp):
+        pass
+
+    def newNumberVector(self, nvp):
+        pass
+
+    def newTextVector(self, tvp):
+        pass
 
 class AstroController:
     def __init__(self):
@@ -197,7 +221,9 @@ class AstroController:
     def goto_object(self, object_name):
         try:
             object_name = object_name.strip().upper().replace("  ", " ")
-            if object_name.startswith("M") and not object_name.startswith("M "):
+            if object_name.startswith("MESSIER") and not object_name.startswith("MESSIER "):
+                object_name = object_name.replace("MESSIER", "M ", 1)
+            elif object_name.startswith("M") and not object_name.startswith("M "):
                 object_name = object_name.replace("M", "M ", 1)
             elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
                 object_name = object_name.replace("NGC", "NGC ", 1)
@@ -232,19 +258,19 @@ class AstroController:
         s = float(parts[2])
         return sign * (d + m/60 + s/3600)
 
-    def synchronize_position(self):
-        # Synchronisiert die aktuelle Position von INDI-Teleskop zurück zur GUI-Anzeige
-        with self.indiclient.status_lock:
-            ra = self.indiclient.current_ra
-            dec = self.indiclient.current_dec
-        if ra is not None and dec is not None:
-            self.objectDisplay = f"RA: {ra:.6f}, DEC: {dec:.6f}"
-            logging.info(f"Synchronisiert Position: RA={ra}, DEC={dec}")
-        else:
-            self.objectDisplay = "Position unbekannt"
-            logging.warning("Keine Positionsdaten zum Synchronisieren")
+    def synchronize(self):
+        # Synchronisieren: Aktuelle Position der Montierung als Referenz setzen
+        coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
+        if coords is None:
+            self.objectDisplay = "Synchronisation fehlgeschlagen"
+            return
+        ra = coords[0].value
+        dec = coords[1].value
+        # Beispiel: Einfach Save Observation als Sync-Operation
+        self.save_observation(ra, dec, True)
+        self.objectDisplay = f"Synchronisiert RA={ra:.4f} DEC={dec:.4f}"
+        logging.info(self.objectDisplay)
 
-# GUI mit Liveanzeige und Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
 
@@ -284,40 +310,45 @@ if __name__ == "__main__":
         update_display()
 
     def synchronize():
-        controller.synchronize_position()
+        controller.synchronize()
         update_display()
-
-    label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
-    label_display.grid(row=0, column=0, columnspan=5, sticky="nsew")
 
     buttons = [
         ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
         ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
         ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
-        ('Messier', lambda: add_digit('M ')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
-        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto),
-        ('Clear', clear)
+        ('Messier', lambda: add_digit('M')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
+        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto)
     ]
 
     row = 1
     col = 0
+    max_cols = 5
     for (text, cmd) in buttons:
         b = tk.Button(root, text=text, command=cmd, fg='red', bg='black', padx=2,
                       highlightbackground='red', highlightthickness=2,
                       highlightcolor="black", font='verdana 18')
-        b.grid(row=row, column=col, sticky="nsew")
+        b.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
         col += 1
-        if col > 2:
+        if col >= max_cols:
             col = 0
             row += 1
 
-    tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew")
-    tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew")
-    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
+    # Clear-Button extra, unten rechts
+    btn_clear = tk.Button(root, text="Clear", command=clear, fg='white', bg='red', font='verdana 18')
+    btn_clear.grid(row=row, column=max_cols-1, sticky="nsew", padx=2, pady=2)
 
-    for i in range(5):
+    # Prev, Next, Synchronisieren daneben
+    tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew", padx=2, pady=2)
+    tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew", padx=2, pady=2)
+    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='blue', fg='white').grid(row=row, column=2, sticky="nsew", padx=2, pady=2)
+
+    for i in range(max_cols):
         root.columnconfigure(i, weight=1)
     for i in range(row+1):
         root.rowconfigure(i, weight=1)
+
+    label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
+    label_display.grid(row=0, column=0, columnspan=max_cols, sticky="nsew")
 
     root.mainloop()
