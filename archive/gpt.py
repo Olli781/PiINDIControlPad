@@ -4,19 +4,21 @@ from datetime import datetime
 import socket
 import PyIndi
 import time
+import numpy as np
+from astropy.wcs import WCS
+from astropy.io import fits
+import sys
 import threading
 import os
-import sys
+import math
 import logging
 from pathlib import Path
 import sqlite3
 from astroquery.simbad import Simbad
-from astropy.wcs import WCS
-from astropy.io import fits
 
 # Logging einrichten
 logging.basicConfig(
-    filename='astrocontroller.log',
+    filename='astrocontroller.log', 
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s'
 )
@@ -26,6 +28,11 @@ DEBUG = True
 EXPOSURE_TIME = 5.0
 TELESCOPE_NAME = "Telescope Simulator"
 CCD_NAME = "CCD Simulator"
+MAX_DEVIATION_ARCSEC = 30
+LATITUDE = 49.8951
+LONGITUDE = -97.1384
+ALTITUDE = 300
+UTC = pytz.utc
 DB_PATH = Path("astro_data.db")
 
 class IndiClient(PyIndi.BaseClient):
@@ -35,6 +42,23 @@ class IndiClient(PyIndi.BaseClient):
 
     def newBLOB(self, bp):
         self.blob_event.set()
+
+    def newDevice(self, device):
+        logging.info(f"New device detected: {device.getDeviceName()}")
+
+    def newProperty(self, property):
+        logging.info(f"New property: {property.getName()}")
+
+    def newSwitch(self, svp):
+        # Beispiel: Abfangen von Status-Updates hier möglich
+        pass
+
+    def newNumber(self, nvp):
+        # Abfangen von Positionsupdates oder anderen Zahlenwerten
+        if nvp.getName() == "EQUATORIAL_EOD_COORD":
+            ra = nvp[0].value
+            dec = nvp[1].value
+            logging.info(f"Position update: RA={ra}, DEC={dec}")
 
 class AstroController:
     def __init__(self):
@@ -180,45 +204,37 @@ class AstroController:
 
     def goto_object(self, object_name):
         try:
-            obj = object_name.strip().upper().replace("  ", " ")
+            object_name = object_name.strip().upper().replace("  ", " ")
+            if object_name.startswith("M ") or object_name.startswith("MESSIER "):
+                # Akzeptiere "M" oder "Messier" mit oder ohne Leerzeichen
+                object_name = object_name.replace("MESSIER ", "M ", 1)
+                object_name = object_name.replace("M", "M ", 1)
+            elif object_name.startswith("M"):
+                object_name = object_name.replace("M", "M ", 1)
+            elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
+                object_name = object_name.replace("NGC", "NGC ", 1)
+            elif object_name.startswith("IC") and not object_name.startswith("IC "):
+                object_name = object_name.replace("IC", "IC ", 1)
 
-            # Für M, NGC, IC: Leerzeichen entfernen für bessere Suche
-            if obj.startswith("M"):
-                obj_clean = "M" + obj[1:].replace(" ", "")
-            elif obj.startswith("NGC"):
-                obj_clean = "NGC" + obj[3:].replace(" ", "")
-            elif obj.startswith("IC"):
-                obj_clean = "IC" + obj[2:].replace(" ", "")
-            else:
-                obj_clean = obj
-
-            # Erst Versuch mit 'obj_clean'
-            result = Simbad.query_object(obj_clean)
-
-            # Wenn nicht gefunden, probiere 'obj' mit Leerzeichen
-            if result is None and obj != obj_clean:
-                result = Simbad.query_object(obj)
-
+            result = Simbad.query_object(object_name)
             if result is None:
+                logging.warning(f"Objekt '{object_name}' nicht gefunden")
                 self.objectDisplay = f"Nicht gefunden: {object_name}"
                 return
-
             ra_str = result['RA'][0]
             dec_str = result['DEC'][0]
-
             ra = self.hms_to_degrees(ra_str)
             dec = self.dms_to_degrees(dec_str)
-
             self.update_position(ra, dec)
-            self.objectDisplay = f"Goto {obj_clean} (RA={ra:.4f}, DEC={dec:.4f})"
-
+            self.objectDisplay = f"Goto {object_name}"
+            logging.info(f"Goto {object_name}: RA={ra}, DEC={dec}")
         except Exception as e:
+            logging.error(f"Fehler bei Goto {object_name}: {e}")
             self.objectDisplay = f"Fehler: {object_name}"
-            logging.error(f"goto_object Fehler bei '{object_name}': {e}")
 
     def hms_to_degrees(self, hms):
         h, m, s = [float(part) for part in hms.split()]
-        return 15 * (h + m / 60 + s / 3600)
+        return 15 * (h + m/60 + s/3600)
 
     def dms_to_degrees(self, dms):
         parts = dms.split()
@@ -226,19 +242,21 @@ class AstroController:
         d = abs(float(parts[0]))
         m = float(parts[1])
         s = float(parts[2])
-        return sign * (d + m / 60 + s / 3600)
+        return sign * (d + m/60 + s/3600)
 
     def synchronize(self):
-        # Beispielimplementierung: Hier kann man die Synchronisation mit Teleskopstatus einbauen
-        coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
-        if coords:
+        try:
+            coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
+            if coords is None:
+                self.objectDisplay = "Teleskopdaten nicht verfügbar"
+                return
             ra = coords[0].value
             dec = coords[1].value
-            self.objectDisplay = f"Sync RA={ra:.4f} DEC={dec:.4f}"
-            logging.info(f"Synchronisiert mit RA={ra}, DEC={dec}")
-        else:
-            self.objectDisplay = "Sync fehlgeschlagen"
-            logging.warning("Synchronisation fehlgeschlagen - keine Koordinaten")
+            self.objectDisplay = f"Sync: RA={ra:.4f}, DEC={dec:.4f}"
+            logging.info(f"Synchronisiert: RA={ra}, DEC={dec}")
+        except Exception as e:
+            self.objectDisplay = "Synchronisierung fehlgeschlagen"
+            logging.error(f"Synchronisierung fehlgeschlagen: {e}")
 
 # GUI mit Steuerbuttons
 if __name__ == "__main__":
@@ -287,11 +305,21 @@ if __name__ == "__main__":
     label_display.grid(row=0, column=0, columnspan=5, sticky="nsew")
 
     buttons = [
-        ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
-        ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
-        ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
-        ('Messier', lambda: add_digit('M')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
-        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto),
+        ('1', lambda: add_digit('1')), 
+        ('2', lambda: add_digit('2')), 
+        ('3', lambda: add_digit('3')),
+        ('4', lambda: add_digit('4')), 
+        ('5', lambda: add_digit('5')), 
+        ('6', lambda: add_digit('6')),
+        ('7', lambda: add_digit('7')), 
+        ('8', lambda: add_digit('8')), 
+        ('9', lambda: add_digit('9')),
+        ('Messier', lambda: add_digit('M')), 
+        ('0', lambda: add_digit('0')), 
+        ('NGC', lambda: add_digit('NGC')),
+        ('IC', lambda: add_digit('IC')), 
+        ('Solve', solve), 
+        ('Goto', goto),
         ('Clear', clear)
     ]
 
@@ -309,11 +337,11 @@ if __name__ == "__main__":
 
     tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew")
     tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew")
-    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
+    tk.Button(root, text="Synchronize", command=synchronize, font='verdana 18', bg='blue', fg='white').grid(row=row, column=2, sticky="nsew")
 
     for i in range(5):
         root.columnconfigure(i, weight=1)
-    for i in range(row+1):
+    for i in range(6):
         root.rowconfigure(i, weight=1)
 
     root.mainloop()
