@@ -39,24 +39,18 @@ class IndiClient(PyIndi.BaseClient):
     def __init__(self):
         super(IndiClient, self).__init__()
         self.blob_event = threading.Event()
+        self.status_lock = threading.Lock()
+        self.current_ra = None
+        self.current_dec = None
 
     def newBLOB(self, bp):
         self.blob_event.set()
 
-    def newNumber(self, nd):
-        # Hier kann man Statusupdates abfangen, z.B. Positionen
-        # print(f"Number updated: {nd.name}")
-        pass
-
-    def newSwitch(self, sp):
-        # Statusupdates für Schalter
-        pass
-
-    def newText(self, tp):
-        pass
-
-    def newMessage(self, device, message):
-        logging.info(f"INDI Message from {device}: {message}")
+    def newNumber(self, np):
+        if np.name == "EQUATORIAL_EOD_COORD":
+            with self.status_lock:
+                self.current_ra = np[0].value
+                self.current_dec = np[1].value
 
 class AstroController:
     def __init__(self):
@@ -203,11 +197,11 @@ class AstroController:
     def goto_object(self, object_name):
         try:
             object_name = object_name.strip().upper().replace("  ", " ")
-            if object_name.startswith("M ") == False and object_name.startswith("M"):
+            if object_name.startswith("M") and not object_name.startswith("M "):
                 object_name = object_name.replace("M", "M ", 1)
-            elif object_name.startswith("NGC ") == False and object_name.startswith("NGC"):
+            elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
                 object_name = object_name.replace("NGC", "NGC ", 1)
-            elif object_name.startswith("IC ") == False and object_name.startswith("IC"):
+            elif object_name.startswith("IC") and not object_name.startswith("IC "):
                 object_name = object_name.replace("IC", "IC ", 1)
 
             result = Simbad.query_object(object_name)
@@ -239,16 +233,18 @@ class AstroController:
         return sign * (d + m/60 + s/3600)
 
     def synchronize_position(self):
-        coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
-        if coords:
-            ra = coords[0].value
-            dec = coords[1].value
-            self.objectDisplay = f"Synchronized RA: {ra:.5f} DEC: {dec:.5f}"
+        # Synchronisiert die aktuelle Position von INDI-Teleskop zurück zur GUI-Anzeige
+        with self.indiclient.status_lock:
+            ra = self.indiclient.current_ra
+            dec = self.indiclient.current_dec
+        if ra is not None and dec is not None:
+            self.objectDisplay = f"RA: {ra:.6f}, DEC: {dec:.6f}"
+            logging.info(f"Synchronisiert Position: RA={ra}, DEC={dec}")
         else:
-            self.objectDisplay = "Synchronisierung fehlgeschlagen"
-        logging.info(f"Position synchronisiert: RA={ra}, DEC={dec}")
+            self.objectDisplay = "Position unbekannt"
+            logging.warning("Keine Positionsdaten zum Synchronisieren")
 
-# GUI mit Steuerbuttons
+# GUI mit Liveanzeige und Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
 
@@ -299,15 +295,16 @@ if __name__ == "__main__":
         ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
         ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
         ('Messier', lambda: add_digit('M ')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
-        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto), ('Clear', clear)
+        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto),
+        ('Clear', clear)
     ]
 
     row = 1
     col = 0
     for (text, cmd) in buttons:
         b = tk.Button(root, text=text, command=cmd, fg='red', bg='black', padx=2,
-                     highlightbackground='red', highlightthickness=2,
-                     highlightcolor="black", font='verdana 18')
+                      highlightbackground='red', highlightthickness=2,
+                      highlightcolor="black", font='verdana 18')
         b.grid(row=row, column=col, sticky="nsew")
         col += 1
         if col > 2:
