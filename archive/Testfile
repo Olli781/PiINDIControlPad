@@ -1,0 +1,189 @@
+import tkinter as tk
+import pytz
+from datetime import datetime
+import socket
+import threading
+import sqlite3
+import logging
+from pathlib import Path
+from astroquery.simbad import Simbad
+
+# Logging einrichten
+logging.basicConfig(
+    filename='astrocontroller.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
+
+DB_PATH = Path("astro_data.db")
+UTC = pytz.utc
+
+class AstroController:
+    def __init__(self):
+        self.objectDisplay = ""
+        self.currTour = 0
+        self.init_database()
+        self.ip_address = self.get_ip_address()
+
+    def get_ip_address(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('10.255.255.255', 1))
+            IP = s.getsockname()[0]
+        except Exception:
+            IP = '127.0.0.1'
+        finally:
+            s.close()
+        return IP
+
+    def init_database(self):
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS observations (
+                id INTEGER PRIMARY KEY,
+                timestamp TEXT,
+                ra REAL,
+                dec REAL,
+                solved INTEGER
+            )''')
+            conn.commit()
+
+    def save_observation(self, ra, dec, solved):
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO observations (timestamp, ra, dec, solved) VALUES (?, ?, ?, ?)",
+                      (datetime.utcnow().isoformat(), ra, dec, int(solved)))
+            conn.commit()
+
+    # *** Simulierte Aufnahme + Plate Solve ***
+    def capture_and_solve(self):
+        logging.info("Simulierter Capture & Solve gestartet")
+        ra, dec = 180.0, 45.0  # Dummy-Koordinaten
+        self.save_observation(ra, dec, True)
+        return ra, dec
+
+    def goto_object(self, object_name):
+        try:
+            object_name = object_name.strip().upper().replace("  ", " ")
+            # Korrigiere Format wie zuvor
+            if object_name.startswith("M") and not object_name.startswith("M "):
+                object_name = object_name.replace("M", "M ", 1)
+            elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
+                object_name = object_name.replace("NGC", "NGC ", 1)
+            elif object_name.startswith("IC") and not object_name.startswith("IC "):
+                object_name = object_name.replace("IC", "IC ", 1)
+
+            result = Simbad.query_object(object_name)
+            if result is None:
+                logging.warning(f"Objekt '{object_name}' nicht gefunden")
+                self.objectDisplay = f"Nicht gefunden: {object_name}"
+                return
+            ra_str = result['RA'][0]
+            dec_str = result['DEC'][0]
+            ra = self.hms_to_degrees(ra_str)
+            dec = self.dms_to_degrees(dec_str)
+            # Statt echte Teleskopsteuerung -> nur Anzeige aktualisieren
+            self.objectDisplay = f"Goto {object_name} (RA={ra:.2f}, DEC={dec:.2f})"
+            logging.info(f"Goto {object_name}: RA={ra}, DEC={dec}")
+        except Exception as e:
+            logging.error(f"Fehler bei Goto {object_name}: {e}")
+            self.objectDisplay = f"Fehler: {object_name}"
+
+    def hms_to_degrees(self, hms):
+        h, m, s = [float(part) for part in hms.split()]
+        return 15 * (h + m/60 + s/3600)
+
+    def dms_to_degrees(self, dms):
+        parts = dms.split()
+        sign = -1 if parts[0].startswith('-') else 1
+        d = abs(float(parts[0]))
+        m = float(parts[1])
+        s = float(parts[2])
+        return sign * (d + m/60 + s/3600)
+
+    def synchronize(self):
+        # Dummy-Sync: einfach Status melden
+        self.objectDisplay = f"Synchronisation erfolgreich\nIP: {self.ip_address}"
+        logging.info("Synchronisation durchgeführt")
+
+# GUI mit Schaltflächen
+if __name__ == "__main__":
+    controller = AstroController()
+
+    root = tk.Tk()
+    root.title("AstroController Test GUI")
+    root.geometry("600x400")
+
+    def update_display():
+        label_display.config(text=controller.objectDisplay)
+        root.update()
+
+    def add_digit(d):
+        controller.objectDisplay += d
+        update_display()
+
+    def clear():
+        controller.objectDisplay = ""
+        update_display()
+
+    def solve():
+        ra_dec = controller.capture_and_solve()
+        if ra_dec:
+            controller.objectDisplay = f"Solved RA={ra_dec[0]:.2f}, DEC={ra_dec[1]:.2f}"
+        else:
+            controller.objectDisplay = "Solve fehlgeschlagen"
+        update_display()
+
+    def goto():
+        object_name = controller.objectDisplay.strip()
+        controller.goto_object(object_name)
+        update_display()
+
+    def prev():
+        controller.currTour = max(0, controller.currTour - 1)
+        controller.objectDisplay = f"TOUR {controller.currTour}"
+        update_display()
+
+    def next_():
+        controller.currTour += 1
+        controller.objectDisplay = f"TOUR {controller.currTour}"
+        update_display()
+
+    def synchronize():
+        controller.synchronize()
+        update_display()
+
+    label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white', wraplength=580)
+    label_display.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=5, pady=5)
+
+    buttons = [
+        ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
+        ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
+        ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
+        ('Messier', lambda: add_digit('M ')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC ')),
+        ('IC', lambda: add_digit('IC ')), ('Solve', solve), ('Goto', goto),
+        ('Clear', clear)
+    ]
+
+    row = 1
+    col = 0
+    for (text, cmd) in buttons:
+        b = tk.Button(root, text=text, command=cmd, fg='red', bg='black', padx=5,
+                      highlightbackground='red', highlightthickness=2,
+                      font='verdana 18')
+        b.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+        col += 1
+        if col > 2:
+            col = 0
+            row += 1
+
+    tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew", padx=2, pady=2)
+    tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew", padx=2, pady=2)
+    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew", padx=2, pady=2)
+
+    for i in range(3):
+        root.columnconfigure(i, weight=1)
+    for i in range(row + 1):
+        root.rowconfigure(i, weight=1)
+
+    root.mainloop()
