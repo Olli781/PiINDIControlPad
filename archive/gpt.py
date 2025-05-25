@@ -11,6 +11,16 @@ import sys
 import threading
 import os
 import math
+import logging
+from pathlib import Path
+import sqlite3
+
+# Logging einrichten
+logging.basicConfig(
+    filename='astrocontroller.log', 
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
 
 # Globale Konfigurationsvariablen
 DEBUG = True
@@ -22,6 +32,7 @@ LATITUDE = 49.8951
 LONGITUDE = -97.1384
 ALTITUDE = 300
 UTC = pytz.utc
+DB_PATH = Path("astro_data.db")
 
 class IndiClient(PyIndi.BaseClient):
     def __init__(self):
@@ -38,22 +49,19 @@ class AstroController:
         self.ccd = None
         self.solve_requested = False
         self.solve_ok = True
-
         self.setup_indi()
         self.ip_address = self.get_ip_address()
+        self.init_database()
 
     def setup_indi(self):
         self.indiclient.setServer("localhost", 7624)
         if not self.indiclient.connectServer():
-            print("INDI Server not erreichbar. Starte mit:")
-            print("  indiserver indi_simulator_telescope indi_simulator_ccd")
+            logging.error("INDI Server nicht erreichbar")
             sys.exit(1)
 
-        # Teleskop verbinden
         self.telescope = self.connect_device(TELESCOPE_NAME, "CONNECTION")
-        self.set_switch(self.telescope, "ON_COORD_SET", [1, 0, 0])  # TRACK ON
+        self.set_switch(self.telescope, "ON_COORD_SET", [1, 0, 0])
 
-        # CCD verbinden
         self.ccd = self.connect_device(CCD_NAME, "CONNECTION")
         self.set_text(self.ccd, "ACTIVE_DEVICES", [TELESCOPE_NAME])
         self.indiclient.setBLOBMode(PyIndi.B_ALSO, CCD_NAME, "CCD1")
@@ -105,8 +113,26 @@ class AstroController:
             s.close()
         return IP
 
+    def init_database(self):
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS observations (
+                id INTEGER PRIMARY KEY,
+                timestamp TEXT,
+                ra REAL,
+                dec REAL,
+                solved INTEGER
+            )''')
+            conn.commit()
+
+    def save_observation(self, ra, dec, solved):
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO observations (timestamp, ra, dec, solved) VALUES (?, ?, ?, ?)",
+                      (datetime.utcnow().isoformat(), ra, dec, int(solved)))
+            conn.commit()
+
     def capture_and_solve(self):
-        # Starte Belichtung
         exposure = self.ccd.getNumber("CCD_EXPOSURE")
         exposure[0].value = EXPOSURE_TIME
         self.indiclient.sendNewNumber(exposure)
@@ -127,15 +153,18 @@ class AstroController:
             timeout += 1
 
         if not os.path.exists("solve.wcs"):
-            print("Plate Solve fehlgeschlagen")
+            logging.warning("Plate Solve fehlgeschlagen")
+            self.save_observation(None, None, False)
             return None
 
         try:
             with fits.open("solve.wcs") as hdul:
                 w = WCS(hdul[0].header)
-                return w.wcs.crval
+                ra, dec = w.wcs.crval
+                self.save_observation(ra, dec, True)
+                return ra, dec
         except Exception as e:
-            print("Fehler beim Parsen der WCS:", e)
+            logging.error(f"WCS Fehler: {e}")
             return None
 
     def update_position(self, ra, dec):
@@ -152,21 +181,20 @@ class AstroGUI:
         self.root.configure(bg='black')
         self.root.geometry("400x600")
         self.build_ui()
-
         self.update_ui()
         self.root.mainloop()
 
     def build_ui(self):
         for x in range(3):
             tk.Grid.columnconfigure(self.root, x, weight=1)
-        for y in range(5):
+        for y in range(6):
             tk.Grid.rowconfigure(self.root, y, weight=1)
 
         self.label_localtime = tk.Label(self.root, font='verdana 14', fg='red', bg='black')
         self.label_localtime.grid(row=0, column=0, sticky="w", columnspan=2)
 
         self.label_status = tk.Label(self.root, text=self.controller.ip_address, font='verdana 14', fg='red', bg='black')
-        self.label_status.grid(row=0, column=2, sticky="e", columnspan=1)
+        self.label_status.grid(row=0, column=2, sticky="e")
 
         tk.Button(self.root, text="Solve On", command=self.solve_on, font='verdana 24',
                   fg='red', bg='black', highlightbackground='red', highlightthickness=2).grid(row=1, column=1, sticky="nsew")
@@ -179,6 +207,9 @@ class AstroGUI:
         self.label_utctime.grid(row=4, column=0, columnspan=2, sticky="nsew")
         self.label_ip = tk.Label(self.root, text=self.controller.ip_address, font='verdana 14', fg='red', bg='black')
         self.label_ip.grid(row=4, column=2, sticky="nsew")
+
+        tk.Button(self.root, text="Show Log", command=self.show_log, font='verdana 14',
+                  fg='red', bg='black', highlightbackground='red').grid(row=5, column=1, sticky="nsew")
 
     def update_ui(self):
         now = datetime.now()
@@ -193,7 +224,6 @@ class AstroGUI:
         coords = self.controller.capture_and_solve()
         if coords:
             ra, dec = coords
-            print("Solved: RA =", ra, "Dec =", dec)
             self.controller.update_position(ra, dec)
             self.label_status.config(text="Tracking")
         else:
@@ -204,8 +234,18 @@ class AstroGUI:
         self.label_status.config(text="Solve Disabled")
 
     def sync(self):
-        print("Sync requested (not implemented)")
-        self.label_status.config(text="Sync Placeholder")
+        # Beispiel Sync Funktion
+        self.label_status.config(text="Syncing...")
+        coords = self.controller.capture_and_solve()
+        if coords:
+            ra, dec = coords
+            self.controller.update_position(ra, dec)
+            self.label_status.config(text="Synced")
+        else:
+            self.label_status.config(text="Sync Failed")
+
+    def show_log(self):
+        os.system("xdg-open astrocontroller.log")
 
 if __name__ == "__main__":
     controller = AstroController()
