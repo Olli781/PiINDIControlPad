@@ -14,6 +14,9 @@ import math
 import logging
 from pathlib import Path
 import sqlite3
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.animation import FuncAnimation
 
 # Logging einrichten
 logging.basicConfig(
@@ -49,6 +52,8 @@ class AstroController:
         self.ccd = None
         self.solve_requested = False
         self.solve_ok = True
+        self.currTour = 0
+        self.objectDisplay = ""
         self.setup_indi()
         self.ip_address = self.get_ip_address()
         self.init_database()
@@ -134,12 +139,21 @@ class AstroController:
 
     def capture_and_solve(self):
         exposure = self.ccd.getNumber("CCD_EXPOSURE")
+        if exposure is None:
+            logging.error("CCD_EXPOSURE nicht verfügbar")
+            return None
+
         exposure[0].value = EXPOSURE_TIME
         self.indiclient.sendNewNumber(exposure)
 
         self.indiclient.blob_event.clear()
         self.indiclient.blob_event.wait()
-        image_blob = self.ccd.getBLOB("CCD1")[0].getblobdata()
+        blob_vector = self.ccd.getBLOB("CCD1")
+        if not blob_vector or not blob_vector[0].getblobdata():
+            logging.error("Kein BLOB-Datenempfang")
+            return None
+
+        image_blob = blob_vector[0].getblobdata()
 
         with open("solve.fits", "wb") as f:
             f.write(image_blob)
@@ -173,80 +187,106 @@ class AstroController:
         coords[1].value = dec
         self.indiclient.sendNewNumber(coords)
 
-class AstroGUI:
-    def __init__(self, controller):
-        self.controller = controller
-        self.root = tk.Tk()
-        self.root.title("AstroControl")
-        self.root.configure(bg='black')
-        self.root.geometry("400x600")
-        self.build_ui()
-        self.update_ui()
-        self.root.mainloop()
+    def start_live_plot(self):
+        def animate(i):
+            with sqlite3.connect(DB_PATH) as conn:
+                c = conn.cursor()
+                c.execute("SELECT timestamp, ra, dec FROM observations WHERE solved = 1 ORDER BY timestamp DESC LIMIT 100")
+                rows = c.fetchall()
 
-    def build_ui(self):
-        for x in range(3):
-            tk.Grid.columnconfigure(self.root, x, weight=1)
-        for y in range(6):
-            tk.Grid.rowconfigure(self.root, y, weight=1)
+            if not rows:
+                return
 
-        self.label_localtime = tk.Label(self.root, font='verdana 14', fg='red', bg='black')
-        self.label_localtime.grid(row=0, column=0, sticky="w", columnspan=2)
+            rows.reverse()
+            timestamps = [datetime.fromisoformat(row[0]) for row in rows]
+            ras = [row[1] for row in rows]
+            decs = [row[2] for row in rows]
 
-        self.label_status = tk.Label(self.root, text=self.controller.ip_address, font='verdana 14', fg='red', bg='black')
-        self.label_status.grid(row=0, column=2, sticky="e")
+            ax.clear()
+            ax.plot(timestamps, ras, label='RA')
+            ax.plot(timestamps, decs, label='DEC')
+            ax.set_xlabel('Zeit')
+            ax.set_ylabel('Koordinaten (deg)')
+            ax.legend()
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            ax.set_title('Live-Plot RA/DEC')
 
-        tk.Button(self.root, text="Solve On", command=self.solve_on, font='verdana 24',
-                  fg='red', bg='black', highlightbackground='red', highlightthickness=2).grid(row=1, column=1, sticky="nsew")
-        tk.Button(self.root, text="Solve Off", command=self.solve_off, font='verdana 24',
-                  fg='red', bg='black', highlightbackground='red', highlightthickness=2).grid(row=2, column=1, sticky="nsew")
-        tk.Button(self.root, text="Sync", command=self.sync, font='verdana 24',
-                  fg='red', bg='black', highlightbackground='red', highlightthickness=2).grid(row=3, column=1, sticky="nsew")
+        fig, ax = plt.subplots()
+        ani = FuncAnimation(fig, animate, interval=5000)
+        plt.tight_layout()
+        plt.show()
 
-        self.label_utctime = tk.Label(self.root, font='verdana 14', fg='red', bg='black')
-        self.label_utctime.grid(row=4, column=0, columnspan=2, sticky="nsew")
-        self.label_ip = tk.Label(self.root, text=self.controller.ip_address, font='verdana 14', fg='red', bg='black')
-        self.label_ip.grid(row=4, column=2, sticky="nsew")
-
-        tk.Button(self.root, text="Show Log", command=self.show_log, font='verdana 14',
-                  fg='red', bg='black', highlightbackground='red').grid(row=5, column=1, sticky="nsew")
-
-    def update_ui(self):
-        now = datetime.now()
-        self.label_localtime.config(text=now.strftime("%d-%b-%Y\n%H:%M:%S"))
-        utc_now = datetime.now(tz=UTC)
-        self.label_utctime.config(text=utc_now.strftime("%d-%b-%Y\n%H:%M:%S UT"))
-        self.root.after(1000, self.update_ui)
-
-    def solve_on(self):
-        self.controller.solve_requested = True
-        self.label_status.config(text="Solving...")
-        coords = self.controller.capture_and_solve()
-        if coords:
-            ra, dec = coords
-            self.controller.update_position(ra, dec)
-            self.label_status.config(text="Tracking")
-        else:
-            self.label_status.config(text="Solve Failed")
-
-    def solve_off(self):
-        self.controller.solve_requested = False
-        self.label_status.config(text="Solve Disabled")
-
-    def sync(self):
-        # Beispiel Sync Funktion
-        self.label_status.config(text="Syncing...")
-        coords = self.controller.capture_and_solve()
-        if coords:
-            ra, dec = coords
-            self.controller.update_position(ra, dec)
-            self.label_status.config(text="Synced")
-        else:
-            self.label_status.config(text="Sync Failed")
-
-    def show_log(self):
-        os.system("xdg-open astrocontroller.log")
-
+# GUI mit Liveanzeige und Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
-    AstroGUI(controller)
+
+    root = tk.Tk()
+    root.title("AstroController GUI")
+    root.geometry("600x400")
+
+    def update_display():
+        label_display.config(text=controller.objectDisplay)
+        root.update()
+
+    def add_digit(d):
+        controller.objectDisplay += d
+        update_display()
+
+    def clear():
+        controller.objectDisplay = ""
+        update_display()
+
+    def solve():
+        controller.objectDisplay = f"Solved: {controller.objectDisplay}"
+        update_display()
+
+    def goto():
+        controller.objectDisplay = f"Goto {controller.objectDisplay}"
+        update_display()
+
+    def prev():
+        controller.currTour = max(0, controller.currTour - 1)
+        controller.objectDisplay = f"TOUR {controller.currTour}"
+        update_display()
+
+    def next_():
+        controller.currTour += 1
+        controller.objectDisplay = f"TOUR {controller.currTour}"
+        update_display()
+
+    def start_plot():
+        threading.Thread(target=controller.start_live_plot, daemon=True).start()
+
+    label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
+    label_display.grid(row=0, column=0, columnspan=5, sticky="nsew")
+
+    buttons = [
+        ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
+        ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
+        ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
+        ('Solve', solve), ('0', lambda: add_digit('0')), ('Goto', goto),
+        ('Clear', clear)
+    ]
+
+    row = 1
+    col = 0
+    for (text, cmd) in buttons:
+        b = tk.Button(root, text=text, command=cmd, fg='red', bg='black', padx=2,
+                     highlightbackground='red', highlightthickness=2,
+                     highlightcolor="black", font='verdana 18')
+        b.grid(row=row, column=col, sticky="nsew")
+        col += 1
+        if col > 2:
+            col = 0
+            row += 1
+
+    tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew")
+    tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew")
+    tk.Button(root, text="Live-Plot", command=start_plot, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
+
+    for i in range(5):
+        root.columnconfigure(i, weight=1)
+    for i in range(6):
+        root.rowconfigure(i, weight=1)
+
+    root.mainloop()
