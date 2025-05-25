@@ -17,6 +17,7 @@ import sqlite3
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.animation import FuncAnimation
+from astroquery.simbad import Simbad
 
 # Logging einrichten
 logging.basicConfig(
@@ -187,6 +188,44 @@ class AstroController:
         coords[1].value = dec
         self.indiclient.sendNewNumber(coords)
 
+    def goto_object(self, object_name):
+        try:
+            object_name = object_name.strip().upper().replace("  ", " ")
+            if object_name.startswith("M") and not object_name.startswith("M "):
+                object_name = object_name.replace("M", "M ", 1)
+            elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
+                object_name = object_name.replace("NGC", "NGC ", 1)
+            elif object_name.startswith("IC") and not object_name.startswith("IC "):
+                object_name = object_name.replace("IC", "IC ", 1)
+
+            result = Simbad.query_object(object_name)
+            if result is None:
+                logging.warning(f"Objekt '{object_name}' nicht gefunden")
+                self.objectDisplay = f"Nicht gefunden: {object_name}"
+                return
+            ra_str = result['RA'][0]
+            dec_str = result['DEC'][0]
+            ra = self.hms_to_degrees(ra_str)
+            dec = self.dms_to_degrees(dec_str)
+            self.update_position(ra, dec)
+            self.objectDisplay = f"Goto {object_name}"
+            logging.info(f"Goto {object_name}: RA={ra}, DEC={dec}")
+        except Exception as e:
+            logging.error(f"Fehler bei Goto {object_name}: {e}")
+            self.objectDisplay = f"Fehler: {object_name}"
+
+    def hms_to_degrees(self, hms):
+        h, m, s = [float(part) for part in hms.split()]
+        return 15 * (h + m/60 + s/3600)
+
+    def dms_to_degrees(self, dms):
+        parts = dms.split()
+        sign = -1 if parts[0].startswith('-') else 1
+        d = abs(float(parts[0]))
+        m = float(parts[1])
+        s = float(parts[2])
+        return sign * (d + m/60 + s/3600)
+
     def start_live_plot(self):
         def animate(i):
             with sqlite3.connect(DB_PATH) as conn:
@@ -216,6 +255,29 @@ class AstroController:
         plt.tight_layout()
         plt.show()
 
+    # Neu: Kombinierter Ablauf goto + Bildaufnahme + Plate Solve mit Callback fürs GUI
+    def goto_and_solve(self, object_name, update_callback=None):
+        self.objectDisplay = f"Goto {object_name} läuft..."
+        if update_callback:
+            update_callback()
+        self.goto_object(object_name)
+        if update_callback:
+            update_callback()
+
+        self.objectDisplay = "Bildaufnahme und Plate Solve läuft..."
+        if update_callback:
+            update_callback()
+
+        result = self.capture_and_solve()
+        if result is not None:
+            ra, dec = result
+            self.objectDisplay = f"Plate Solve OK: RA={ra:.4f}, DEC={dec:.4f}"
+        else:
+            self.objectDisplay = "Plate Solve fehlgeschlagen"
+
+        if update_callback:
+            update_callback()
+
 # GUI mit Liveanzeige und Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
@@ -240,9 +302,14 @@ if __name__ == "__main__":
         controller.objectDisplay = f"Solved: {controller.objectDisplay}"
         update_display()
 
+    # Neu: goto startet jetzt goto_and_solve in Thread mit GUI-Updates
     def goto():
-        controller.objectDisplay = f"Goto {controller.objectDisplay}"
-        update_display()
+        object_name = controller.objectDisplay.strip()
+        if not object_name:
+            return
+        def thread_func():
+            controller.goto_and_solve(object_name, update_display)
+        threading.Thread(target=thread_func, daemon=True).start()
 
     def prev():
         controller.currTour = max(0, controller.currTour - 1)
@@ -264,7 +331,8 @@ if __name__ == "__main__":
         ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
         ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
         ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
-        ('Solve', solve), ('0', lambda: add_digit('0')), ('Goto', goto),
+        ('M', lambda: add_digit('M')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
+        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto),
         ('Clear', clear)
     ]
 
