@@ -14,9 +14,6 @@ import math
 import logging
 from pathlib import Path
 import sqlite3
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.animation import FuncAnimation
 from astroquery.simbad import Simbad
 
 # Logging einrichten
@@ -45,6 +42,21 @@ class IndiClient(PyIndi.BaseClient):
 
     def newBLOB(self, bp):
         self.blob_event.set()
+
+    def newNumber(self, nd):
+        # Hier kann man Statusupdates abfangen, z.B. Positionen
+        # print(f"Number updated: {nd.name}")
+        pass
+
+    def newSwitch(self, sp):
+        # Statusupdates für Schalter
+        pass
+
+    def newText(self, tp):
+        pass
+
+    def newMessage(self, device, message):
+        logging.info(f"INDI Message from {device}: {message}")
 
 class AstroController:
     def __init__(self):
@@ -191,11 +203,11 @@ class AstroController:
     def goto_object(self, object_name):
         try:
             object_name = object_name.strip().upper().replace("  ", " ")
-            if object_name.startswith("M") and not object_name.startswith("M "):
+            if object_name.startswith("M ") == False and object_name.startswith("M"):
                 object_name = object_name.replace("M", "M ", 1)
-            elif object_name.startswith("NGC") and not object_name.startswith("NGC "):
+            elif object_name.startswith("NGC ") == False and object_name.startswith("NGC"):
                 object_name = object_name.replace("NGC", "NGC ", 1)
-            elif object_name.startswith("IC") and not object_name.startswith("IC "):
+            elif object_name.startswith("IC ") == False and object_name.startswith("IC"):
                 object_name = object_name.replace("IC", "IC ", 1)
 
             result = Simbad.query_object(object_name)
@@ -226,36 +238,17 @@ class AstroController:
         s = float(parts[2])
         return sign * (d + m/60 + s/3600)
 
-    def start_live_plot(self):
-        def animate(i):
-            with sqlite3.connect(DB_PATH) as conn:
-                c = conn.cursor()
-                c.execute("SELECT timestamp, ra, dec FROM observations WHERE solved = 1 ORDER BY timestamp DESC LIMIT 100")
-                rows = c.fetchall()
+    def synchronize_position(self):
+        coords = self.telescope.getNumber("EQUATORIAL_EOD_COORD")
+        if coords:
+            ra = coords[0].value
+            dec = coords[1].value
+            self.objectDisplay = f"Synchronized RA: {ra:.5f} DEC: {dec:.5f}"
+        else:
+            self.objectDisplay = "Synchronisierung fehlgeschlagen"
+        logging.info(f"Position synchronisiert: RA={ra}, DEC={dec}")
 
-            if not rows:
-                return
-
-            rows.reverse()
-            timestamps = [datetime.fromisoformat(row[0]) for row in rows]
-            ras = [row[1] for row in rows]
-            decs = [row[2] for row in rows]
-
-            ax.clear()
-            ax.plot(timestamps, ras, label='RA')
-            ax.plot(timestamps, decs, label='DEC')
-            ax.set_xlabel('Zeit')
-            ax.set_ylabel('Koordinaten (deg)')
-            ax.legend()
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-            ax.set_title('Live-Plot RA/DEC')
-
-        fig, ax = plt.subplots()
-        ani = FuncAnimation(fig, animate, interval=5000)
-        plt.tight_layout()
-        plt.show()
-
-# GUI mit Liveanzeige und Steuerbuttons
+# GUI mit Steuerbuttons
 if __name__ == "__main__":
     controller = AstroController()
 
@@ -294,8 +287,9 @@ if __name__ == "__main__":
         controller.objectDisplay = f"TOUR {controller.currTour}"
         update_display()
 
-    def start_plot():
-        threading.Thread(target=controller.start_live_plot, daemon=True).start()
+    def synchronize():
+        controller.synchronize_position()
+        update_display()
 
     label_display = tk.Label(root, text="", font='verdana 20', bg='black', fg='white')
     label_display.grid(row=0, column=0, columnspan=5, sticky="nsew")
@@ -304,9 +298,8 @@ if __name__ == "__main__":
         ('1', lambda: add_digit('1')), ('2', lambda: add_digit('2')), ('3', lambda: add_digit('3')),
         ('4', lambda: add_digit('4')), ('5', lambda: add_digit('5')), ('6', lambda: add_digit('6')),
         ('7', lambda: add_digit('7')), ('8', lambda: add_digit('8')), ('9', lambda: add_digit('9')),
-        ('M', lambda: add_digit('M')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
-        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto),
-        ('Clear', clear)
+        ('Messier', lambda: add_digit('M ')), ('0', lambda: add_digit('0')), ('NGC', lambda: add_digit('NGC')),
+        ('IC', lambda: add_digit('IC')), ('Solve', solve), ('Goto', goto), ('Clear', clear)
     ]
 
     row = 1
@@ -323,11 +316,11 @@ if __name__ == "__main__":
 
     tk.Button(root, text="Prev", command=prev, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=0, sticky="nsew")
     tk.Button(root, text="Next", command=next_, font='verdana 18', bg='gray20', fg='white').grid(row=row, column=1, sticky="nsew")
-    tk.Button(root, text="Live-Plot", command=start_plot, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
+    tk.Button(root, text="Synchronisieren", command=synchronize, font='verdana 18', bg='green', fg='white').grid(row=row, column=2, sticky="nsew")
 
     for i in range(5):
         root.columnconfigure(i, weight=1)
-    for i in range(6):
+    for i in range(row+1):
         root.rowconfigure(i, weight=1)
 
     root.mainloop()
